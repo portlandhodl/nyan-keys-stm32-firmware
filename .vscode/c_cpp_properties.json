@@ -13,6 +13,7 @@
         "Middlewares/Third_Party/AL94_USB_Composite/COMPOSITE/Class/CDC_ACM/Inc",
         "Middlewares/Third_Party/AL94_USB_Composite/COMPOSITE/Class/COMPOSITE/Inc",
         "Middlewares/Third_Party/AL94_USB_Composite/COMPOSITE/Class/HID_KEYBOARD/Inc",
+        "Middlewares/Third_Party/AL94_USB_Composite/COMPOSITE/Class/HID_RAW/Inc",
         "Middlewares/Third_Party/AL94_USB_Composite/COMPOSITE/Core/Inc",
         "Middlewares/Third_Party/AL94_USB_Composite/COMPOSITE/Target"
       ],

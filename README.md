@@ -29,6 +29,8 @@ _Please make a PR if you decide to use NyanOS for your keyboard PCB_
 
 ### Responsibilities 
  - __USB 2.0 HS HID/CDC composite device__
+ - __VIA support via a 32 byte Raw HID interface (usage page 0xFF60)__
+ - __Dynamic keymap (2 layers x 61 keys) persisted to the onboard EEPROM__
  - __Serial console via USB__
  - __EEPROM master - FPGA Bitstream Storage__
  - __FPGA bitstream programmer - SPI Master__
@@ -36,6 +38,19 @@ _Please make a PR if you decide to use NyanOS for your keyboard PCB_
  - __Bitcoin Miner - opt-in__
  - __USB HID Interface @ 8000hz Polling__
  - __SPI Master to FPGA switch serializer and debouncer__
+
+### VIA Support
+NyanOS speaks the VIA protocol over a dedicated raw HID interface (usage page ```0xFF60```, usage ```0x61```, 32 byte interrupt IN/OUT reports) while keeping the 8000hz NKRO keyboard interface untouched. All 61 keys are remappable on 2 layers (base + FN) and the keymap is persisted to the onboard EEPROM (bank 0, address ```0x0100```, big-endian layer-major - the same layout QMK uses, so the standard VIA buffer commands work unmodified).
+
+The keyboard definition for the VIA app lives at [```via/nyan_keys_60.json```](via/nyan_keys_60.json). To use it today, open [VIA](https://usevia.app) (or a local build of [the-via/app](https://github.com/the-via/app)) and use __Design -> Load Draft Definition__ with that file; to get native detection, submit the JSON to [the-via/keyboards](https://github.com/the-via/keyboards) (```src/nyan_keys/nyan_keys_60.json```).
+
+Supported VIA features: dynamic keymap get/set (per-keycode and buffer commands), 2 layers, ```MO(1)``` layer switching, ```KC_TRNS``` fallthrough, mod-wrapped keycodes (e.g. ```LCTL(KC_X)```), media keycode translation (KC_MUTE/KC_VOLU/KC_VOLD to the legacy Nyan Keys bytes), switch matrix state for the key tester, uptime, EEPROM reset (restores factory defaults) and bootloader jump (enters the existing DFU flow). The factory default keymap reproduces the original hardcoded layout, including __FN + WIN__ persistent super-key lockout. Macros, encoders and lighting are not supported (the VIA app hides them when the device answers ```id_unhandled```/macro count 0).
+
+A host-side unit test of the protocol handler and report builder is available:
+```
+gcc -std=gnu11 -I<stubs> -ICore/Inc test_via.c Core/Src/nyan_via.c Core/Src/nyan_keys.c -o test_via
+```
+(with stub headers for HAL/USB; the test simulates the VIA app command stream and a 24xx EEPROM in memory).
 
 ### NyanOS Terminal
 One of the nicer features of NyanOS is a fully functional USB-CDC (_serial_) interface to interact with NyanOSk. Currently functionality is limited to only the most necessary commands for keyboard operation and configuration. 
@@ -86,22 +101,8 @@ The FPGA configuration LED will always match the pin status of ```c_done``` of t
 | 0     | 0x00C0      | Reserved 0             | 16     |
 | 0     | 0x00D0      | Reserved 1             | 16     |
 | 0     | 0x00E0      | Reserved 2             | 16     |
-| 0     | 0x00F0      | Reserved 3             | 16     |
-| 0     | 0x0100      | Reserved 4             | 16     |
-| 0     | 0x0110      | Reserved 5             | 16     |
-| 0     | 0x0120      | Reserved 6             | 16     |
-| 0     | 0x0130      | Reserved 7             | 16     |
-| 0     | 0x0140      | Reserved 8             | 16     |
-| 0     | 0x0150      | Reserved 9             | 16     |
-| 0     | 0x0160      | Reserved 10            | 16     |
-| 0     | 0x0170      | Reserved 11            | 16     |
-| 0     | 0x0180      | Reserved 12            | 16     |
-| 0     | 0x0190      | Reserved 13            | 16     |
-| 0     | 0x01A0      | Reserved 14            | 16     |
-| 0     | 0x01B0      | Reserved 15            | 16     |
-| 0     | 0x01C0      | Reserved 16            | 16     |
-| 0     | 0x01D0      | Reserved 17            | 16     |
-| 0     | 0x01E0      | Reserved 18            | 16     |
-| 0     | 0x01F0      | Reserved 19            | 16     |
+| 0     | 0x00F0      | VIA Magic + Version    | 16     |
+| 0     | 0x0100      | VIA Dynamic Keymap     | 244    |
+| 0     | 0x01F4      | Reserved (5-19)        | 12     |
 | 1     | 0x0000      | FPGA Bitstream         | 65535  |
 

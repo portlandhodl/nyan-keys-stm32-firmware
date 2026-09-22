@@ -51,6 +51,9 @@
 /*---------- _USBD_USE_HID_KEYBOARD  -----------*/
 #define _USBD_USE_HID_KEYBOARD      true
 
+/*---------- _USBD_USE_HID_RAW  -----------*/
+#define _USBD_USE_HID_RAW      true
+
 /*---------- _USBD_USE_HID_CUSTOM  -----------*/
 #define _USBD_USE_HID_CUSTOM      false
 

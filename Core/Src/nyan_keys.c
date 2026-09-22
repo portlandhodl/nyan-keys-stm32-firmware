@@ -9,6 +9,7 @@
 #include "24xx_eeprom.h"
 #include "nyan_eeprom_map.h"
 #include "nyan_keys.h"
+#include "nyan_via.h"
 #include "spi.h"
 #include "usb_hid_keys.h"
 
@@ -30,7 +31,7 @@ NyanKeysReturn NyanStuctAllocator(NyanKeys *keys, volatile NyanKeyBoardDescripto
     if(keys->boot_byte_cnt < NUM_BOOT_KEYS)
         desc->BOOTKEYCODE[keys->boot_byte_cnt++] = hid_scan_code;
     else if(keys->ext_byte_cnt < NUM_HYBRID_KEYS)
-        desc->EXTKEYCODE[keys->boot_byte_cnt++] = hid_scan_code;
+        desc->EXTKEYCODE[keys->ext_byte_cnt++] = hid_scan_code;
     else
         return NYAN_KEYS_FAILURE;
     return NYAN_KEYS_SUCCESS;
@@ -90,223 +91,75 @@ NyanKeysReturn NyanBuildHidReportFromKeyStates(NyanKeys *keys, volatile NyanKeyB
     keys->boot_byte_cnt = 0;
     keys->ext_byte_cnt = 0;
 
-    // Get the state of the alternate function key
-    bool alt_fn = !NyanGetKeyState(keys, FN);
+    if(!keys->warmed_up)
+        return NYAN_KEYS_SUCCESS;
 
-    // Iterate through the keys and process their states - Perform actions on state
-    for (Keyboard60PercentKeys key = ESC; key < NUM_KEYS; ++key) {
-         if(!NyanGetKeyState(keys, key) && keys->warmed_up) {
-            switch (key) {
-                case ESC:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_GRAVE : KEY_ESC);
-                    break;
-                case TAB:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_TAB : KEY_TAB);
-                    break;
-                case CAPS:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_CAPSLOCK : KEY_CAPSLOCK);
-                    break;
-                case L_SHIFT:
-                    desc->MODIFIER |= KEY_MOD_LSHIFT;
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_LEFTSHIFT : KEY_LEFTSHIFT);
-                    break;
-                case LEFT_CTRL:
-                    desc->MODIFIER |= KEY_MOD_LCTRL;
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_LEFTCTRL : KEY_LEFTCTRL);
-                    break;
-                case NUM_1:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_F1 : KEY_1);
-                    break;
-                case L_WIN:
-                    /*** Handle the disablement of the windows logo (super) for gaming ***/
-                    if(alt_fn) {
-                        keys->super_key_disabled = !keys->super_key_disabled;
-                        NyanKeysWriteSuperDisableEEPROM(&nos_eeprom, keys->super_key_disabled);
-                    } if (keys->super_key_disabled) {
-                        //If the super key is disabled we do nothing on press
-                    } else {
-                        desc->MODIFIER |= KEY_MOD_LMETA;
-                        NyanStuctAllocator(keys, desc, alt_fn ? KEY_LEFTMETA : KEY_LEFTMETA);
-                    }  
-                    break;
-                case L_ALT:
-                    desc->MODIFIER |= KEY_MOD_LALT;
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_LEFTALT : KEY_LEFTALT);
-                    break;
-                case Q:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_Q : KEY_Q);
-                    break;
-                case A:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_LEFT : KEY_A);
-                    break;
-                case Z:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_Z : KEY_Z);
-                    break;
-                case NUM_2:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_F2 : KEY_2);
-                    break;
-                case W:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_UP : KEY_W);
-                    break;
-                case S:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_DOWN : KEY_S);
-                    break;
-                case X:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_X : KEY_X);
-                    break;
-                case C:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_C : KEY_C);
-                    break;
-                case D:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_RIGHT : KEY_D);
-                    break;
-                case K:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_HOME : KEY_K);
-                    break;
-                case I:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_SYSRQ : KEY_I);
-                    break;
-                case NUM_8:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_F8 : KEY_8);
-                    break;
-                case L_ANGLE_BRACKET:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_END : KEY_COMMA);
-                    break;
-                case L:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_PAGEUP : KEY_L);
-                    break;
-                case O:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_SCROLLLOCK : KEY_O);
-                    break;
-                case NUM_9:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_F9 : KEY_9);
-                    break;
-                case R_ANGLE_BRACKET:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_PAGEDOWN : KEY_DOT);
-                    break;
-                case COLON:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_LEFT : KEY_SEMICOLON);
-                    break;
-                case P:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_PAUSE : KEY_P);
-                    break;
-                case NUM_0:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_F10 : KEY_0);
-                    break;
-                case QUESTION_MARK:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_DOWN : KEY_SLASH);
-                    break;
-                case L_SQUARE_BRACKET:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_UP : KEY_LEFTBRACE);
-                    break;
-                case R_WIN:
-                    /*** Handle the disablement of the windows logo (super) for gaming ***/
-                    if(alt_fn) {
-                        keys->super_key_disabled = !keys->super_key_disabled;
-                        NyanKeysWriteSuperDisableEEPROM(&nos_eeprom, keys->super_key_disabled);
-                    } if (keys->super_key_disabled) {
-                        //If the super key is disabled we do nothing on press
-                    } else {
-                        desc->MODIFIER |= KEY_MOD_LMETA;
-                        NyanStuctAllocator(keys, desc, alt_fn ? KEY_RIGHTMETA : KEY_RIGHTMETA);
-                    }
-                    break;
-                case FN:
-                    // This should never be called.
-                    break;
-                case MINUS:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_F11 : KEY_MINUS);
-                    break;
-                case QUOTE:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_RIGHT : KEY_APOSTROPHE);
-                    break;
-                case MENU:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_COMPOSE : KEY_COMPOSE);;
-                    break;
-                case R_SQUARE_BRACKET:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_RIGHTBRACE : KEY_RIGHTBRACE);
-                    break;
-                case PLUS:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_F12 : KEY_EQUAL);
-                    break;
-                case R_SHIFT:
-                    desc->MODIFIER |= KEY_MOD_RSHIFT;
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_RIGHTSHIFT : KEY_RIGHTSHIFT);
-                    break;
-                case ENTER:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_ENTER : KEY_ENTER);
-                    break;
-                case SLASH:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_INSERT : KEY_BACKSLASH);
-                    break;
-                case BACKSPACE:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_DELETE : KEY_BACKSPACE);
-                    break;
-                case R_CTRL:
-                    desc->MODIFIER |= KEY_MOD_RCTRL;
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_RIGHTCTRL : KEY_RIGHTCTRL);
-                    break;
-                case E:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_E : KEY_E);
-                    break;
-                case NUM_3:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_F3 : KEY_3);
-                    break;
-                case V:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_V : KEY_V);
-                    break;
-                case F:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_F : KEY_F);
-                    break;
-                case R:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_R : KEY_R);
-                    break;
-                case NUM_4:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_F4 : KEY_4);
-                    break;
-                case SPACE:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_SPACE : KEY_SPACE);
-                    break;
-                case G:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_G : KEY_G);
-                    break;
-                case B:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_B : KEY_B);
-                    break;
-                case T:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_T : KEY_T);
-                    break;
-                case NUM_5:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_F5 : KEY_5);
-                    break;
-                case H:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_HOME : KEY_H);
-                    break;
-                case Y:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_Y : KEY_Y);
-                    break;
-                case NUM_6:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_F6 : KEY_6);
-                    break;
-                case N:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_VOLUMEUP : KEY_N);
-                    break;
-                case J:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_LEFT : KEY_J);
-                    break;
-                case U:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_PAGEUP : KEY_U);
-                    break;
-                case NUM_7:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_F7 : KEY_7);
-                    break;
-                case M:
-                    NyanStuctAllocator(keys, desc, alt_fn ? KEY_MUTE : KEY_M);
-                    break;
-                default:
-                    // Handle any other case
-                    break;
+    // Resolve the active layer: any pressed key bound to MO(n) momentarily raises layer n
+    uint8_t active_layer = 0;
+    for (uint8_t key = 0; key < NUM_KEYS; ++key) {
+        if(!NyanGetKeyState(keys, key)) {
+            uint16_t keycode = NyanViaGetKeycode(0, key);
+            if(keycode >= VIA_QK_MOMENTARY && keycode <= VIA_QK_MOMENTARY_MAX) {
+                uint8_t layer = (uint8_t)(keycode - VIA_QK_MOMENTARY);
+                if(layer < VIA_NUM_LAYERS && layer > active_layer)
+                    active_layer = layer;
             }
+        }
+    }
+
+    // Iterate through the keys and process their states via the VIA dynamic keymap
+    for (uint8_t key = 0; key < NUM_KEYS; ++key) {
+        if(NyanGetKeyState(keys, key))
+            continue;
+
+        uint16_t keycode = NyanViaGetKeycode(active_layer, key);
+        if(keycode == VIA_KC_TRNS)
+            keycode = NyanViaGetKeycode(0, key);
+
+        // Layer keys and empty slots never emit scancodes
+        if(keycode == VIA_KC_NO || keycode == VIA_KC_TRNS ||
+          (keycode >= VIA_QK_MOMENTARY && keycode <= VIA_QK_MOMENTARY_MAX))
+            continue;
+
+        // QK_MODS wrapper: LCTL(KC_X) style keycodes carry a modifier in the high byte
+        uint8_t extra_mods = 0;
+        if(keycode >= VIA_QK_MODS && keycode <= VIA_QK_MODS_MAX) {
+            uint8_t mods = (uint8_t)((keycode >> 8) & 0x1FU);
+            extra_mods = (mods & 0x10U) ? (uint8_t)((mods & 0x0FU) << 4) : mods;
+            keycode &= 0x00FFU;
+        }
+
+        // VIA media keycodes map back to the legacy bytes the original
+        // hardcoded Nyan Keys layout emitted on the wire
+        switch (keycode) {
+            case VIA_KC_MUTE: keycode = KEY_MUTE; break;
+            case VIA_KC_VOLU: keycode = KEY_VOLUMEUP; break;
+            case VIA_KC_VOLD: keycode = KEY_VOLUMEDOWN; break;
+            default: break;
+        }
+
+        // This firmware only emits 8 bit keyboard page usages
+        if(keycode > 0x00FFU)
+            continue;
+
+        uint8_t usage = (uint8_t)keycode;
+
+        /*** Persistent Windows logo key (super) disablement for gaming ***/
+        if(usage == KEY_LEFTMETA || usage == KEY_RIGHTMETA) {
+            if(active_layer > 0) {
+                keys->super_key_disabled = !keys->super_key_disabled;
+                NyanKeysWriteSuperDisableEEPROM(&nos_eeprom, keys->super_key_disabled);
+                continue;
+            }
+            if(keys->super_key_disabled)
+                continue;
+        }
+
+        if(usage >= KEY_LEFTCTRL && usage <= KEY_RIGHTMETA) {
+            desc->MODIFIER |= (uint8_t)(1U << (usage - KEY_LEFTCTRL));
+        } else if(usage >= KEY_A) {
+            desc->MODIFIER |= extra_mods;
+            NyanStuctAllocator(keys, desc, usage);
         }
     }
 

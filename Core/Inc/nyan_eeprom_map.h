@@ -15,8 +15,8 @@
 #define ADDR_RESERVED_0                 0x00C0 /*** Now used for storing Super Key Disablement State ***/
 #define ADDR_RESERVED_1                 0x00D0
 #define ADDR_RESERVED_2                 0x00E0
-#define ADDR_RESERVED_3                 0x00F0
-#define ADDR_RESERVED_4                 0x0100
+#define ADDR_RESERVED_3                 0x00F0 /*** Now used for the VIA keymap magic/version ***/
+#define ADDR_RESERVED_4                 0x0100 /*** VIA dynamic keymap starts here (see ADDR_VIA_KEYMAP) ***/
 #define ADDR_RESERVED_5                 0x0110
 #define ADDR_RESERVED_6                 0x0120
 #define ADDR_RESERVED_7                 0x0130
@@ -32,6 +32,12 @@
 #define ADDR_RESERVED_17                0x01D0
 #define ADDR_RESERVED_18                0x01E0
 #define ADDR_RESERVED_19                0x01F0
+
+// VIA Dynamic Keymap (bank 0)
+#define ADDR_VIA_MAGIC                  ADDR_RESERVED_3  /* 'V','I', keymap layout version */
+#define ADDR_VIA_KEYMAP                 ADDR_RESERVED_4  /* layer-major big-endian u16 keycodes */
+#define SIZE_VIA_MAGIC                  3
+#define SIZE_VIA_KEYMAP                 244              /* 2 layers x 61 keys x 2 bytes */
 
 // FPGA Bitstream (bank 1)
 #define ADDR_FPGA_BITSTREAM             0x0000

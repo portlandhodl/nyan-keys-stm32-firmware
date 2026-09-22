@@ -30,7 +30,18 @@ FPGAReturn FPGAInit(LatticeIceHX* fpga)
     HAL_GPIO_WritePin(SPI4_SS_GPIO_Port, SPI4_SS_Pin, GPIO_PIN_RESET);
     // Uncompress and write the bitstream - This happens all in one file to keep the ram footprint low.
     WriteUncomprBitstream(&ice_uncompr, fpga->p_bitstream_compressed, fpga->bitstream_compressed_size);
-    while(!fpga->configured){
+    // Wait for the FPGA to raise c_done - bounded so NyanOS still boots when the
+    // FPGA never configures (blank EEPROM, unpopulated/damaged FPGA). The main
+    // loop retries configuration in the background when this times out.
+    uint32_t config_wait_start = HAL_GetTick();
+    while(!fpga->configured && (HAL_GetTick() - config_wait_start) < FPGA_CONFIG_TIMEOUT_MS){
+    }
+    if(!fpga->configured) {
+        // Give up for now - free resources and let the caller retry later.
+        free(fpga->p_bitstream_compressed);
+        fpga->p_bitstream_compressed = NULL;
+        SCB_EnableDCache();
+        return FPGA_FAILURE;
     }
     // Send over the remaining dummy bytes 49 of them at minim, we will send 80 to be safe.
     for(uint8_t dummy_byte = 0; dummy_byte < 10; ++dummy_byte) {
