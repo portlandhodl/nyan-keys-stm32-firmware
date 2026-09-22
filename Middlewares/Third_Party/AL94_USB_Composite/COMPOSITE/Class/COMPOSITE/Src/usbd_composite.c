@@ -133,6 +133,9 @@ typedef struct USBD_COMPOSITE_CFG_DESC_t
 #if (USBD_USE_HID_KEYBOARD == 1)
   uint8_t USBD_HID_KEYBOARD_DESC[HID_KEYBOARD_CONFIG_DESC_SIZE - 0x09];
 #endif
+#if (USBD_USE_HID_RAW == 1)
+  uint8_t USBD_HID_RAW_DESC[HID_RAW_CONFIG_DESC_SIZE - 0x09];
+#endif
 #if (USBD_USE_HID_CUSTOM == 1)
   uint8_t USBD_HID_CUSTOM_DESC[USB_CUSTOM_HID_CONFIG_DESC_SIZ - 0x09];
 #endif
@@ -216,6 +219,9 @@ static uint8_t USBD_COMPOSITE_Init(USBD_HandleTypeDef *pdev, uint8_t cfgidx)
 #if (USBD_USE_HID_KEYBOARD == 1)
   USBD_HID_KEYBOARD.Init(pdev, cfgidx);
 #endif
+#if (USBD_USE_HID_RAW == 1)
+  USBD_HID_RAW.Init(pdev, cfgidx);
+#endif
 #if (USBD_USE_HID_CUSTOM == 1)
   USBD_HID_CUSTOM.Init(pdev, cfgidx);
 #endif
@@ -264,6 +270,9 @@ static uint8_t USBD_COMPOSITE_DeInit(USBD_HandleTypeDef *pdev, uint8_t cfgidx)
 #endif
 #if (USBD_USE_HID_KEYBOARD == 1)
   USBD_HID_KEYBOARD.DeInit(pdev, cfgidx);
+#endif
+#if (USBD_USE_HID_RAW == 1)
+  USBD_HID_RAW.DeInit(pdev, cfgidx);
 #endif
 #if (USBD_USE_HID_CUSTOM == 1)
   USBD_HID_CUSTOM.DeInit(pdev, cfgidx);
@@ -331,6 +340,12 @@ static uint8_t USBD_COMPOSITE_Setup(USBD_HandleTypeDef *pdev,
   if (LOBYTE(req->wIndex) == HID_KEYBOARD_ITF_NBR)
   {
     return USBD_HID_KEYBOARD.Setup(pdev, req);
+  }
+#endif
+#if (USBD_USE_HID_RAW == 1)
+  if (LOBYTE(req->wIndex) == HID_RAW_ITF_NBR)
+  {
+    return USBD_HID_RAW.Setup(pdev, req);
   }
 #endif
 #if (USBD_USE_HID_CUSTOM == 1)
@@ -419,6 +434,12 @@ static uint8_t USBD_COMPOSITE_DataIn(USBD_HandleTypeDef *pdev, uint8_t epnum)
   if (epnum == (HID_KEYBOARD_IN_EP & 0x7F))
   {
     return USBD_HID_KEYBOARD.DataIn(pdev, epnum);
+  }
+#endif
+#if (USBD_USE_HID_RAW == 1)
+  if (epnum == (HID_RAW_IN_EP & 0x7F))
+  {
+    return USBD_HID_RAW.DataIn(pdev, epnum);
   }
 #endif
 #if (USBD_USE_HID_CUSTOM == 1)
@@ -700,6 +721,12 @@ static uint8_t USBD_COMPOSITE_DataOut(USBD_HandleTypeDef *pdev, uint8_t epnum)
 #endif
 #if (USBD_USE_HID_KEYBOARD == 1)
 #endif
+#if (USBD_USE_HID_RAW == 1)
+  if (epnum == HID_RAW_OUT_EP)
+  {
+    return USBD_HID_RAW.DataOut(pdev, epnum);
+  }
+#endif
 #if (USBD_USE_HID_CUSTOM == 1)
   if (epnum == CUSTOM_HID_OUT_EP)
   {
@@ -836,6 +863,12 @@ static uint8_t *USBD_COMPOSITE_GetUsrStringDesc(USBD_HandleTypeDef *pdev, uint8_
     if (index == HID_KEYBOARD_STR_DESC_IDX)
     {
       USBD_GetString((uint8_t *)HID_KEYBOARD_STR_DESC, USBD_StrDesc, length);
+    }
+#endif
+#if (USBD_USE_HID_RAW == 1)
+    if (index == HID_RAW_STR_DESC_IDX)
+    {
+      USBD_GetString((uint8_t *)HID_RAW_STR_DESC, USBD_StrDesc, length);
     }
 #endif
 #if (USBD_USE_HID_CUSTOM == 1)
@@ -977,6 +1010,21 @@ void USBD_COMPOSITE_Mount_Class(void)
   memcpy(USBD_COMPOSITE_HSCfgDesc.USBD_HID_KEYBOARD_DESC, ptr + 0x09, len - 0x09);
 
   in_ep_track += 1;
+  interface_no_track += 1;
+  USBD_Track_String_Index += 1;
+#endif
+
+#if (USBD_USE_HID_RAW == 1)
+  ptr = USBD_HID_RAW.GetFSConfigDescriptor(&len);
+  USBD_Update_HID_RAW_DESC(ptr, interface_no_track, in_ep_track, out_ep_track, USBD_Track_String_Index);
+  memcpy(USBD_COMPOSITE_FSCfgDesc.USBD_HID_RAW_DESC, ptr + 0x09, len - 0x09);
+
+  ptr = USBD_HID_RAW.GetHSConfigDescriptor(&len);
+  USBD_Update_HID_RAW_DESC(ptr, interface_no_track, in_ep_track, out_ep_track, USBD_Track_String_Index);
+  memcpy(USBD_COMPOSITE_HSCfgDesc.USBD_HID_RAW_DESC, ptr + 0x09, len - 0x09);
+
+  in_ep_track += 1;
+  out_ep_track += 1;
   interface_no_track += 1;
   USBD_Track_String_Index += 1;
 #endif

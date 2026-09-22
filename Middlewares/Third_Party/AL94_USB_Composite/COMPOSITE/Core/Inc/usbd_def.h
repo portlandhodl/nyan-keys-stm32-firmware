@@ -311,6 +311,7 @@ typedef struct _USBD_HandleTypeDef
   void                    *pUserData_CDC_ECM;
   void                    *pClassData_HID_Mouse;
   void                    *pClassData_HID_Keyboard;
+  void                    *pClassData_HID_RAW;
   void                    *pClassData_HID_Custom;
   void                    *pUserData_HID_Custom;
   void                    *pClassData_UAC_MIC;

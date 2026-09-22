@@ -19,6 +19,16 @@ extern Eeprom24xx nos_eeprom;
 extern Iceuncompr ice_uncompr;
 
 /**
+ * @brief Maximum time to wait for the FPGA to raise c_done during configuration.
+ *
+ * If the FPGA never configures (no bitstream in EEPROM, unpopulated or damaged
+ * FPGA), FPGAInit must still return so the rest of NyanOS (USB, VIA, CDC
+ * console) keeps running. The main loop retries configuration in the
+ * background, so a slow or late FPGA still comes up.
+ */
+#define FPGA_CONFIG_TIMEOUT_MS 2000
+
+/**
  * @enum FPGAReturn
  * @brief Enumerates the possible return values for FPGA operations.
  */

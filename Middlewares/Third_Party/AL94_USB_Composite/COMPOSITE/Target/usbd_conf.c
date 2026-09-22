@@ -323,6 +323,9 @@ USBD_StatusTypeDef USBD_LL_Init(USBD_HandleTypeDef *pdev)
 #if (USBD_USE_HID_KEYBOARD == 1)
     HAL_PCDEx_SetTxFiFoInBytes(hpcd_USB_OTG_PTR, (HID_KEYBOARD_IN_EP & 0x7F), 512);
 #endif
+#if (USBD_USE_HID_RAW == 1)
+    HAL_PCDEx_SetTxFiFoInBytes(hpcd_USB_OTG_PTR, (HID_RAW_IN_EP & 0x7F), 64);
+#endif
 #if (USBD_USE_HID_CUSTOM == 1)
     HAL_PCDEx_SetTxFiFoInBytes(hpcd_USB_OTG_PTR, (CUSTOM_HID_IN_EP & 0x7F), 64);
 #endif

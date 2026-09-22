@@ -46,6 +46,7 @@ Core/Src/main.c \
 Core/Src/nyan_bitcoin.c \
 Core/Src/nyan_keys.c \
 Core/Src/nyan_leds.c \
+Core/Src/nyan_via.c \
 Core/Src/nyan_os.c \
 Core/Src/nyan_sha256.c \
 Core/Src/nyan_strings.c \
@@ -84,6 +85,7 @@ Middlewares/Third_Party/AL94_USB_Composite/COMPOSITE/App/usbd_desc.c \
 Middlewares/Third_Party/AL94_USB_Composite/COMPOSITE/Class/CDC_ACM/Src/usbd_cdc_acm.c \
 Middlewares/Third_Party/AL94_USB_Composite/COMPOSITE/Class/COMPOSITE/Src/usbd_composite.c \
 Middlewares/Third_Party/AL94_USB_Composite/COMPOSITE/Class/HID_KEYBOARD/Src/usbd_hid_keyboard.c \
+Middlewares/Third_Party/AL94_USB_Composite/COMPOSITE/Class/HID_RAW/Src/usbd_hid_raw.c \
 Middlewares/Third_Party/AL94_USB_Composite/COMPOSITE/Core/Src/usbd_core.c \
 Middlewares/Third_Party/AL94_USB_Composite/COMPOSITE/Core/Src/usbd_ctlreq.c \
 Middlewares/Third_Party/AL94_USB_Composite/COMPOSITE/Core/Src/usbd_ioreq.c \
@@ -169,6 +171,7 @@ C_INCLUDES =  \
 -IMiddlewares/Third_Party/AL94_USB_Composite/COMPOSITE/Class/CDC_ACM/Inc \
 -IMiddlewares/Third_Party/AL94_USB_Composite/COMPOSITE/Class/COMPOSITE/Inc \
 -IMiddlewares/Third_Party/AL94_USB_Composite/COMPOSITE/Class/HID_KEYBOARD/Inc \
+-IMiddlewares/Third_Party/AL94_USB_Composite/COMPOSITE/Class/HID_RAW/Inc \
 -IMiddlewares/Third_Party/AL94_USB_Composite/COMPOSITE/Core/Inc \
 -IMiddlewares/Third_Party/AL94_USB_Composite/COMPOSITE/Target
 

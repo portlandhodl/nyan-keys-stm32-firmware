@@ -42,6 +42,7 @@
 #include "nyan_strings.h"
 #include "nyan_bitcoin.h"
 #include "nyan_keys.h"
+#include "nyan_via.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -146,6 +147,7 @@ int main(void)
   // USB composite device creation
   MX_USB_DEVICE_Init();
   NyanOsInit(&nos);                    // NyanOS (NOS) Initialization
+  NyanViaInit();                       // VIA dynamic keymap - load from EEPROM or program factory defaults (before FPGAInit: VIA works even if the FPGA never configures)
   FPGAInit((LatticeIceHX*)&nos_fpga);  // FPGA Bitstream Loading 
   NyanKeysInit((NyanKeys*)&nyan_keys); // Load up the fast cat IP for access to your keys; happy typing.
 #ifdef BITCOIN_MINER_EN
@@ -158,11 +160,19 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    NyanViaProcess(); // Handle any pending VIA raw HID command (main loop context)
     if(nos_fpga.configured && !keys_dma_started) {
       keys_dma_started = true;
       NyanGetKeys((NyanKeys*)&nyan_keys);
     } else if (!nos_fpga.configured) {
-      FPGAInit(&nos_fpga);
+      // FPGA configuration is retried in the background - paced so that a board
+      // whose FPGA never configures keeps full USB/VIA/CDC responsiveness
+      // (FPGAInit blocks for seconds while it reloads the bitstream).
+      static uint32_t fpga_retry_ms = 0;
+      if((HAL_GetTick() - fpga_retry_ms) >= 2000U) {
+        FPGAInit(&nos_fpga);
+        fpga_retry_ms = HAL_GetTick(); // pace from the END of the attempt so the main loop gets service time between retries
+      }
     } else if (nos.dfu_mode) {
       HAL_GPIO_WritePin(Nyan_DFU_Enable_GPIO_Port, Nyan_DFU_Enable_Pin, GPIO_PIN_SET);
       HAL_Delay(1000);
