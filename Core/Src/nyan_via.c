@@ -225,7 +225,7 @@ static void NyanViaWriteKeymapByte(uint16_t offset, uint8_t value)
  *
  * Writes are chunked to the 24xx page size (128 bytes) so no write ever
  * crosses a page boundary (which would wrap within the page).
- * Must be called from main loop context - spins on the I2C DMA flags.
+ * Must be called from main loop context - the EEPROM driver blocks.
  */
 static NyanViaReturn NyanViaCommitKeymapRange(uint16_t offset, uint16_t len)
 {
@@ -239,17 +239,13 @@ static NyanViaReturn NyanViaCommitKeymapRange(uint16_t offset, uint16_t len)
         if (chunk > EEPROM_DRIVER_TX_BUF_SZ)
             chunk = EEPROM_DRIVER_TX_BUF_SZ;
 
-        while (nos_eeprom.tx_inflight) {}
         EepromFlushTxBuff(&nos_eeprom);
         for (uint16_t i = 0; i < chunk; ++i)
             nos_eeprom.tx_buf[i] = NyanViaReadKeymapByte(offset + i);
 
-        if (EepromWrite(&nos_eeprom, false, (short)addr, chunk) != EEPROM_SUCCESS) {
-            nos_eeprom.tx_inflight = false; // Unstick the driver on a HAL submission failure
+        // Blocks until the 24xx internal write cycle completes (retried on bus errors)
+        if (EepromWrite(&nos_eeprom, false, addr, chunk) != EEPROM_SUCCESS)
             return VIA_FAILURE;
-        }
-        while (nos_eeprom.tx_inflight) {}
-        HAL_Delay(6U); // Allow the 24xx internal write cycle to complete
 
         offset += chunk;
         len -= chunk;
@@ -270,17 +266,22 @@ static NyanViaReturn NyanViaResetKeymap(void)
 NyanViaReturn NyanViaInit(void)
 {
     // Probe for an existing keymap via the magic + layout version.
-    // Retry the submission until it is accepted: a spurious read failure must
-    // never look like "no magic" and cause the persisted keymap to be wiped.
-    while (EepromRead(&nos_eeprom, false, ADDR_VIA_MAGIC, SIZE_VIA_MAGIC) != EEPROM_SUCCESS) {}
-    while (nos_eeprom.rx_inflight) {}
+    // A read failure (after the driver's retries) must never look like "no
+    // magic" and cause the persisted keymap to be wiped: run on the factory
+    // defaults from RAM and leave the EEPROM alone.
+    if (EepromRead(&nos_eeprom, false, ADDR_VIA_MAGIC, SIZE_VIA_MAGIC) != EEPROM_SUCCESS) {
+        memcpy((void *)nyan_via_keymap, (const void *)nyan_via_default_keymap, sizeof(nyan_via_keymap));
+        return VIA_FAILURE;
+    }
 
     if (nos_eeprom.rx_buf[0] == VIA_MAGIC_BYTE_0 &&
         nos_eeprom.rx_buf[1] == VIA_MAGIC_BYTE_1 &&
         nos_eeprom.rx_buf[2] == VIA_KEYMAP_VERSION) {
         // Load the persisted keymap
-        while (EepromRead(&nos_eeprom, false, ADDR_VIA_KEYMAP, VIA_KEYMAP_BYTES) != EEPROM_SUCCESS) {}
-        while (nos_eeprom.rx_inflight) {}
+        if (EepromRead(&nos_eeprom, false, ADDR_VIA_KEYMAP, VIA_KEYMAP_BYTES) != EEPROM_SUCCESS) {
+            memcpy((void *)nyan_via_keymap, (const void *)nyan_via_default_keymap, sizeof(nyan_via_keymap));
+            return VIA_FAILURE;
+        }
         for (uint16_t i = 0; i < VIA_KEYMAP_BYTES; ++i)
             NyanViaWriteKeymapByte(i, nos_eeprom.rx_buf[i]);
         return VIA_SUCCESS;
@@ -289,19 +290,18 @@ NyanViaReturn NyanViaInit(void)
     // First boot (or layout version change): program factory defaults
     memcpy((void *)nyan_via_keymap, (const void *)nyan_via_default_keymap, sizeof(nyan_via_keymap));
 
-    while (nos_eeprom.tx_inflight) {}
+    // Keymap first, magic last: an interrupted first boot is simply redone
+    if (NyanViaCommitKeymapRange(0U, VIA_KEYMAP_BYTES) != VIA_SUCCESS)
+        return VIA_FAILURE;
+
     EepromFlushTxBuff(&nos_eeprom);
     nos_eeprom.tx_buf[0] = VIA_MAGIC_BYTE_0;
     nos_eeprom.tx_buf[1] = VIA_MAGIC_BYTE_1;
     nos_eeprom.tx_buf[2] = VIA_KEYMAP_VERSION;
-    if (EepromWrite(&nos_eeprom, false, ADDR_VIA_MAGIC, SIZE_VIA_MAGIC) != EEPROM_SUCCESS) {
-        nos_eeprom.tx_inflight = false;
+    if (EepromWrite(&nos_eeprom, false, ADDR_VIA_MAGIC, SIZE_VIA_MAGIC) != EEPROM_SUCCESS)
         return VIA_FAILURE;
-    }
-    while (nos_eeprom.tx_inflight) {}
-    HAL_Delay(6U);
 
-    return NyanViaCommitKeymapRange(0U, VIA_KEYMAP_BYTES);
+    return VIA_SUCCESS;
 }
 
 uint16_t NyanViaGetKeycode(uint8_t layer, uint8_t key)

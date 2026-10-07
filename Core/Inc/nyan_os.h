@@ -14,6 +14,7 @@
 #define _NYAN_CDC_CHANNEL 0
 #define _NYAN_CDC_RX_BUF_SZ 512
 #define _NYAN_CDC_TX_MAX_LEN 128
+#define _NYAN_CDC_RX_PACKET 512 // CDC_DATA_HS_OUT_PACKET_SIZE - the OUT endpoint is armed only while this much fits
 #define _NYAN_CMD_MAX_ARGS 10
 #define _NYAN_CMD_BUF_LEN 128
 
@@ -120,16 +121,11 @@ typedef struct {
     bool        exe_in_progress;                        /**< Flag indicating if a program is being executed. */
 
     uint8_t     cdc_ch;                                 /**< Active CDC channel used. Should always be 0 for Nyan OS. */
-    bool        tx_inflight;                            /**< Flag for ongoing transmission. Initialized to false. */
-    bool        tx_bulk_transfer_in_progress;           /**< Flag for ongoing bulk transfer over USB. */
-    uint8_t     tx_chunks_solid;                        /**< Number of complete _NYAN_CDC_TX_MAX_LEN sized chunks to be sent. */
-    uint8_t     tx_chunks_partial_bytes;                /**< Number of bytes in a partial chunk. */
-    uint8_t     tx_chunk;                               /**< Current chunk number to be sent. */
-    NyanString  tx_buffer;                              /**< Transmission buffer. */
+    bool        tx_inflight;                            /**< A CDC IN transfer is queued (cleared by the USB IRQ). */
+    bool        connect_pending;                        /**< Terminal raised DTR (set by the USB IRQ, handled by the main loop). */
 
     uint32_t    bytes_received;                         /**< Number of bytes received in Direct Buffer Mode. */
-    uint32_t    bytes_array_size;                       /**< Size of the receive buffer in Direct Buffer Mode. */
-    uint8_t*    bytes_array;                            /**< Buffer holding the received data in Direct Buffer Mode. */
+    uint32_t    bytes_array_size;                       /**< Number of bytes expected in Direct Buffer Mode. */
     uint8_t*    command_arg_buffer[_NYAN_CMD_MAX_ARGS]; /**< Buffers to store command arguments. */
 
     uint32_t    perf_keys_count_spi_calls;              /**< Current readable value of the number of SPI calls to KEYS IP over 1s */
@@ -153,13 +149,27 @@ NyanReturn NyanOsInit(volatile NyanOS* nos);
 NyanReturn NyanOsDecodeCommand(volatile NyanOS* nos);
 
 /**
- * @brief Adds data to the NyanOS input buffer.
- * @param nos Pointer to the NyanOS struct.
- * @param pbuf Pointer to the data buffer.
- * @param Len Length of the data to be added.
- * @return NyanReturn indicating success or failure.
+ * @brief USB IRQ: queue received CDC bytes for the main loop.
+ * @param buf Received data.
+ * @param len Number of bytes received.
+ * @return true if the OUT endpoint may be re-armed now; false if the RX ring
+ *         is full - the main loop re-arms it once it has drained (the host is
+ *         NAKed meanwhile).
  */
-NyanReturn NyanAddInputBuffer(volatile NyanOS* nos, uint8_t *pbuf, uint32_t *Len);
+bool NyanCdcRxFromIrq(const uint8_t *buf, uint32_t len);
+
+/**
+ * @brief USB IRQ: the CDC interface was (re)initialized and its OUT endpoint
+ *        re-armed by the class.
+ */
+void NyanCdcRxReset(void);
+
+/**
+ * @brief Main loop: parses console input, executes commands, runs uploads
+ *        and sends queued output.
+ * @param nos Pointer to the NyanOS struct.
+ */
+void NyanOsProcess(volatile NyanOS* nos);
 
 /**
  * @brief Displays a welcome message to the user.
@@ -169,7 +179,8 @@ NyanReturn NyanAddInputBuffer(volatile NyanOS* nos, uint8_t *pbuf, uint32_t *Len
 NyanReturn NyanWelcomeDisplay(volatile NyanOS* nos);
 
 /**
- * @brief Print function for NyanOS, similar to printf.
+ * @brief Queues output for the console (main loop context only). Output that
+ *        does not fit in the TX ring is dropped.
  * @param nos Pointer to the NyanOS struct.
  * @param data Pointer to the data to be printed.
  * @param len Length of the data to be printed.
@@ -178,7 +189,8 @@ NyanReturn NyanWelcomeDisplay(volatile NyanOS* nos);
 NyanReturn NyanPrint(volatile NyanOS* nos, char* data, size_t len);
 
 /**
- * NyanOS Long 128+ character buffer printing support.
+ * @brief Sends the next chunk of queued console output if the CDC IN
+ *        endpoint is idle (main loop context only).
  * @param nos Pointer to the NyanOS struct.
  * @return NyanReturn indicating success or failure.
  */
@@ -235,7 +247,9 @@ NyanReturn NyanExeGetPerformanceStats(volatile NyanOS* nos);
 NyanReturn NyanExeSetOwner(volatile NyanOS* nos);
 
 /**
- * @brief Write an FPGA Bitstream to the EEPROM in 128 byte chunks 
+ * @brief Starts an FPGA bitstream upload: the next <size> received bytes are
+ *        streamed to the EEPROM in 128 byte pages by NyanOsProcess(), then
+ *        the FPGA is reconfigured.
  */
 NyanReturn NyanExeWriteFpgaBitstream(volatile NyanOS* nos);
 
@@ -262,16 +276,9 @@ NyanReturn NyanExeWriteFpgaBitstream(volatile NyanOS* nos);
  * - "nonce": 4 bytes
  * If the command is not recognized, the function returns NOS_FAILURE.
  *
- * After successful buffer allocation, the function waits in a loop until the buffer is completely filled
- * with incoming data, indicated by `nos->bytes_received` matching `nos->bytes_array_size`.
- *
- * Once the data is received, it is copied to the appropriate field in the `nyan_bitcoin->block_header` structure
- * and a success message is printed using the NyanPrint function. The specific field and message depend on the 
- * command received.
- *
- * Finally, the allocated buffer is freed, the system state is set to READY, and the function returns NOS_SUCCESS
- * indicating successful execution of the command. If any step in the process fails, the function returns 
- * NOS_FAILURE.
+ * The shell then enters DIRECT_BUFFER_ACCESS and NyanOsProcess() writes the next received bytes
+ * straight into the matching field of `nyan_bitcoin->block_header`, prints a success message and returns
+ * to READY. The upload is aborted if no data arrives for NYAN_UPLOAD_TIMEOUT_MS.
  */
 NyanReturn NyanExeWriteBitcoinMiner(volatile NyanOS* nos);
 
@@ -285,11 +292,6 @@ void ClearNyanCommandBuffer(volatile NyanOS* nos);
  */
 void FreeNyanCommandArgs(volatile NyanOS* nos);
 
-/**
- * @brief Frees the contents of a NyanString struct.
- * @param nyanString Pointer to the NyanString to be freed.
- */
-void FreeNyanString(NyanString* nyanString);
 
 /**
  * @brief Pulls pin E0 high to charge capacitor to let Nyan Keys enter th DFU mode

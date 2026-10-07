@@ -14,7 +14,7 @@
 #define NUM_HID_KEYS 60 /**< Number of keys that could have any impact on the HID descriptor - We remove the FN Keys */
 #define NUM_BOOT_KEYS 6 /**< Number of keys that can occupy the boot bytes compatible section of nyan keys*/
 #define NUM_HYBRID_KEYS (NUM_HID_KEYS - NUM_BOOT_KEYS) /**< Number of keys that can occupy the extended scancodes bytes section of nyan keys for NRKO*/
-#define NYAN_KEYS_STALL_US 50 /**< A partial frame with no SPI progress for this long is discarded (FPGA retries after 1ms) */
+#define NYAN_KEYS_STALL_US 50 /**< Stall sample period: a partial frame with no SPI progress for a whole period is discarded (FPGA retries after 1ms) */
 
 /**
  * @enum NyanKeysReturn
@@ -58,6 +58,8 @@ typedef struct {
     volatile uint32_t frames_bad;                              /**< Frames rejected (sync/CRC mismatch or DMA error) */
     volatile uint32_t stall_resets;                            /**< Partial frames discarded by the stall watchdog */
     volatile bool super_key_disabled;                          /**< Disable Super Key (Win) key */
+    bool super_toggle_held;                                    /**< FN + WIN was down in the last report (toggle on the press edge only) */
+    volatile bool super_key_save_pending;                      /**< super_key_disabled changed and must be saved by the main loop */
     uint8_t boot_byte_cnt;                                     /**< Track the number of boot compatible bytes used */
     uint8_t ext_byte_cnt;                                      /**M Track the number of extended report bytes used */
 } NyanKeys;
@@ -78,6 +80,14 @@ NyanKeysReturn NyanKeysInit(NyanKeys* keys);
 NyanKeysReturn NyanKeysStart(NyanKeys *keys);
 
 /**
+ * @brief Holds the FPGA keys IP in reset, stops frame reception and reports
+ *        every key released (e.g. while the FPGA is reconfigured).
+ *        NyanKeysStart() resumes.
+ * @param keys Pointer to NyanKeys structure.
+ */
+void NyanKeysStop(NyanKeys *keys);
+
+/**
  * @brief Frame complete handler - call from DMA1_Stream3_IRQHandler.
  *
  * Re-arms reception (with an SPI2 reset so every frame starts bit aligned),
@@ -87,11 +97,18 @@ NyanKeysReturn NyanKeysStart(NyanKeys *keys);
 void NyanKeysDmaIrqHandler(void);
 
 /**
- * @brief Stall watchdog - call from the main loop. Discards a partially
- *        received frame (lost SCLK edge) so the FPGA's retry is received
- *        bit aligned.
+ * @brief Stall watchdog - call from TIM5_IRQHandler (every
+ *        NYAN_KEYS_STALL_US). Discards a partially received frame (lost SCLK
+ *        edge) so the FPGA's retry is received bit aligned.
  */
-void NyanKeysService(void);
+void NyanKeysStallIrqHandler(void);
+
+/**
+ * @brief Main loop: persists settings changed from interrupt context
+ *        (FN + WIN super key lockout).
+ * @param keys Pointer to NyanKeys structure.
+ */
+void NyanKeysSaveSettings(NyanKeys *keys);
 
 /**
  * @brief Called from interrupt context for every valid frame, after it has

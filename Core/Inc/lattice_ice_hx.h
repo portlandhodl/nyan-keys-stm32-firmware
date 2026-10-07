@@ -45,7 +45,8 @@ typedef enum {
  * the size of the compressed bitstream, and a pointer to the bitstream data.
  */
 typedef struct {
-    bool configured;
+    volatile bool configured;              /**< Mirrors CDONE (TIM1 IRQ) - the FPGA is running a bitstream */
+    volatile bool reconfigure_requested;   /**< Reload the bitstream from the EEPROM (main loop) */
     uint16_t bitstream_compressed_size;
     uint8_t* p_bitstream_compressed;
 } LatticeIceHX;
@@ -53,9 +54,9 @@ typedef struct {
 /**
  * @brief Initializes the FPGA.
  * 
- * This function performs the initial configuration of the FPGA. It disables
- * the DCache, fetches and uncompresses the bitstream from EEPROM, and writes
- * it to the FPGA.
+ * This function performs the configuration of the FPGA. It fetches and
+ * uncompresses the bitstream from EEPROM and writes it to the FPGA. Blocking,
+ * main loop context only.
  * 
  * @param fpga Pointer to an LatticeIceHX structure.
  * @return FPGAReturn Indicates the success or failure of the operation.
