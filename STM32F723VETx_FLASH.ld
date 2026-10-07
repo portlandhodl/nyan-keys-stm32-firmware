@@ -53,15 +53,24 @@
 ENTRY(Reset_Handler)
 
 /* Highest address of the user mode stack */
-_estack = ORIGIN(RAM) + LENGTH(RAM);    /* end of RAM */
+_estack = ORIGIN(DTCM) + LENGTH(DTCM);  /* end of DTCM */
+/* Upper bound for the heap (checked by _sbrk in nyan_health.c) */
+_heap_limit = ORIGIN(SRAM) + LENGTH(SRAM);
 /* Generate a link error if heap and stack don't fit into RAM */
 _Min_Heap_Size = 0x800;      /* required amount of heap  */
-_Min_Stack_Size = 0x800; /* required amount of stack */
+_Min_Stack_Size = 0x4000; /* required amount of stack */
 
 /* Specify the memory areas */
 MEMORY
 {
-RAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 256K
+/* DTCM is never D-cached and is reachable by the DMA controllers and the USB
+   OTG HS DMA, so every static buffer (.data/.bss) handed to a DMA engine is
+   coherent without cache maintenance (this includes the stack - the USB
+   stack sends a few control responses from locals). Keep all statics here -
+   the link fails if they and the minimum stack outgrow it. The heap lives in
+   the cached SRAM1/SRAM2 and must never be handed to a DMA engine. */
+DTCM (xrw)     : ORIGIN = 0x20000000, LENGTH = 64K
+SRAM (xrw)     : ORIGIN = 0x20010000, LENGTH = 192K
 FLASH (rx)      : ORIGIN = 0x8008000, LENGTH = 480K
 }
 
@@ -143,7 +152,7 @@ SECTIONS
 
     . = ALIGN(4);
     _edata = .;        /* define a global symbol at data end */
-  } >RAM AT> FLASH
+  } >DTCM AT> FLASH
 
   
   /* Uninitialized data section */
@@ -160,20 +169,34 @@ SECTIONS
     . = ALIGN(4);
     _ebss = .;         /* define a global symbol at bss end */
     __bss_end__ = _ebss;
-  } >RAM
+  } >DTCM
 
-  /* User_heap_stack section, used to check that there is enough RAM left */
-  ._user_heap_stack :
+  /* Not zeroed by the startup code - survives a system/watchdog reset */
+  .noinit (NOLOAD) :
+  {
+    . = ALIGN(4);
+    *(.noinit)
+    *(.noinit*)
+    . = ALIGN(4);
+  } >DTCM
+
+  /* Minimum stack - the stack grows down from the top of DTCM to here */
+  ._user_stack (NOLOAD) :
+  {
+    . = ALIGN(8);
+    . = . + _Min_Stack_Size;
+    . = ALIGN(8);
+  } >DTCM
+
+  /* Heap - grows up from the start of SRAM1 to _heap_limit */
+  ._user_heap (NOLOAD) :
   {
     . = ALIGN(8);
     PROVIDE ( end = . );
     PROVIDE ( _end = . );
     . = . + _Min_Heap_Size;
-    . = . + _Min_Stack_Size;
     . = ALIGN(8);
-  } >RAM
-
-  
+  } >SRAM
 
   /* Remove information from the standard libraries */
   /DISCARD/ :

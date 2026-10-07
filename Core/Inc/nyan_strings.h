@@ -22,6 +22,11 @@ extern const uint8_t nyan_keys_getperf_times_scanned[];
 
 // COMMAND: set-owner
 extern const uint8_t nyan_keys_set_owner_success[];
+extern const uint8_t nyan_keys_set_owner_failed[];
+
+extern const uint8_t nyan_keys_eeprom_error[];
+extern const uint8_t nyan_keys_upload_timeout[];
+extern const uint8_t nyan_keys_upload_aborted[];
 
 extern const uint8_t nyan_keys_unknown_command[];
 

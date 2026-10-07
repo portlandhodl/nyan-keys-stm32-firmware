@@ -161,6 +161,8 @@ static int8_t CDC_Init(uint8_t cdc_ch)
 
   /* ##-1- Set Application Buffers */
   USBD_CDC_SetRxBuffer(cdc_ch, &hUsbDevice, RX_Buffer[cdc_ch]);
+  // The class arms the OUT endpoint right after this - clear any flow control pause
+  NyanCdcRxReset();
 
   //  /*##-2- Start the TIM Base generation in interrupt mode ####################*/
   //  /* Start Channel1 */
@@ -258,9 +260,8 @@ static int8_t CDC_Control(uint8_t cdc_ch, uint8_t cmd, uint8_t *pbuf, uint16_t l
 
   case CDC_SET_CONTROL_LINE_STATE:
     if (pbuf[0] & 0x01 && nos.send_welcome_screen_guard == 0x00) { // Check if DTR bit is set and there hasn't been a recent connection
-      // Init the Nyan Keys Operating System and send the welcome screen.
-      NyanOsInit(&nos);
-      nos.send_welcome_screen = true;
+      // The main loop resets the Nyan Keys Operating System and sends the welcome screen.
+      nos.connect_pending = true;
     }
     break;
 
@@ -294,32 +295,16 @@ static int8_t CDC_Control(uint8_t cdc_ch, uint8_t cmd, uint8_t *pbuf, uint16_t l
 static int8_t CDC_Receive(uint8_t cdc_ch, uint8_t *Buf, uint32_t *Len)
 {
   /* USER CODE BEGIN 6 */
-  // Check if there is something to copy.
+  // USB IRQ context: only queue the bytes - NyanOsProcess() (main loop) parses them.
+  // The endpoint stays NAKed while the RX ring is full; the main loop re-arms it.
+  bool rearm = true;
   if (Buf != NULL && Len != NULL && *Len > 0) {
-    // Allocate memory for the temporary buffer.
-    // Make sure to free this buffer once you're done with it if it's no longer needed.
-    uint8_t* tBuf = (uint8_t*)malloc(*Len * sizeof(uint8_t));
-    if (tBuf == NULL) {
-      // Handle memory allocation error
-      return (USBD_FAIL);
-    }
-    
-    // Copy the contents of Buf into tBuf.
-    memcpy(tBuf, Buf, *Len);
-
-    // Clear the buffers and ready for more data to be received.
-    USBD_CDC_SetRxBuffer(cdc_ch, &hUsbDevice, &Buf[0]);
-    USBD_CDC_ReceivePacket(cdc_ch, &hUsbDevice);
-
     // Activate led to signal data received by MCU
     HAL_GPIO_WritePin(GPIOD, Nyan_Keys_LED3_Pin, GPIO_PIN_SET);
-
-    // Pass the USB CDC input to NyanOS(nos)
-    NyanAddInputBuffer(&nos, tBuf, Len);
-
-    // Free the temporary buffer if it's no longer needed.
-    free(tBuf);
+    rearm = NyanCdcRxFromIrq(Buf, *Len);
   }
+  if (rearm)
+    USBD_CDC_ReceivePacket(cdc_ch, &hUsbDevice);
 
   return (USBD_OK);
   /* USER CODE END 6 */
@@ -339,8 +324,6 @@ static int8_t CDC_Receive(uint8_t cdc_ch, uint8_t *Buf, uint32_t *Len)
   */
 static int8_t CDC_TransmitCplt(uint8_t cdc_ch, uint8_t *Buf, uint32_t *Len, uint8_t epnum)
 {
-  if(!nos.tx_bulk_transfer_in_progress)
-    FreeNyanString(&nos.tx_buffer);
   nos.tx_inflight = 0;
   return (USBD_OK);
 }
@@ -358,8 +341,6 @@ static int8_t CDC_TransmitCplt(uint8_t cdc_ch, uint8_t *Buf, uint32_t *Len, uint
   */
 uint8_t CDC_Transmit(uint8_t cdc_ch, uint8_t *Buf, uint16_t Len)
 {
-  // Take a semaphore and lock up the TX buffer from sends until the CDC_TransmitCplt occours
-  nos.tx_inflight = 1;
   uint8_t result = USBD_OK;
   /* USER CODE BEGIN 7 */
   extern USBD_CDC_ACM_HandleTypeDef CDC_ACM_Class_Data[];
@@ -369,8 +350,12 @@ uint8_t CDC_Transmit(uint8_t cdc_ch, uint8_t *Buf, uint16_t Len)
   {
     return USBD_BUSY;
   }
+  // Lock the TX path until CDC_TransmitCplt - only for a transfer that was actually queued
+  nos.tx_inflight = 1;
   USBD_CDC_SetTxBuffer(cdc_ch, &hUsbDevice, Buf, Len);
   result = USBD_CDC_TransmitPacket(cdc_ch, &hUsbDevice);
+  if (result != USBD_OK)
+    nos.tx_inflight = 0;
   /* USER CODE END 7 */
   return result;
 }

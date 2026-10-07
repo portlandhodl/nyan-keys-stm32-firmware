@@ -36,6 +36,11 @@ const uint8_t nyan_keys_getperf_times_scanned[] = "Total Keyboard Scans 1s: ";
 
 //COMMAND: set-owner
 const uint8_t nyan_keys_set_owner_success[] = "Nyan Keys owner has been successfully set\r\n";
+const uint8_t nyan_keys_set_owner_failed[] = "Failed to set the owner (name too long or EEPROM error)\r\n";
+
+const uint8_t nyan_keys_eeprom_error[] = "EEPROM write failed, upload aborted.\r\n";
+const uint8_t nyan_keys_upload_timeout[] = "\r\nNo data received for 10 seconds, upload aborted.\r\n";
+const uint8_t nyan_keys_upload_aborted[] = "\r\nUpload aborted.\r\n";
 
 const uint8_t nyan_keys_unknown_command[] = "Command not supported by NyanOS";
 

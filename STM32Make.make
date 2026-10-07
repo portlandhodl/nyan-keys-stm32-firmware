@@ -47,6 +47,7 @@ Core/Src/nyan_bitcoin.c \
 Core/Src/nyan_keys.c \
 Core/Src/nyan_leds.c \
 Core/Src/nyan_via.c \
+Core/Src/nyan_health.c \
 Core/Src/nyan_os.c \
 Core/Src/nyan_sha256.c \
 Core/Src/nyan_strings.c \

@@ -38,6 +38,7 @@
 #include "lattice_ice_hx.h"
 // NyanOS and Packages
 #include "nyan_os.h"
+#include "nyan_health.h"
 #include "nyan_leds.h"
 #include "nyan_strings.h"
 #include "nyan_bitcoin.h"
@@ -136,6 +137,7 @@ int main(void)
   MX_TIM14_Init();
   MX_USB_OTG_HS_PCD_Init();
   /* USER CODE BEGIN 2 */
+  NyanHealthInit();                    // Watchdog + reset cause - everything below must feed it within NYAN_WATCHDOG_TIMEOUT_MS
   // Activate the STM32F7 timer interrupts
   HAL_TIM_Base_Start_IT(&htim1);
   HAL_TIM_Base_Start_IT(&htim7);
@@ -153,32 +155,55 @@ int main(void)
 #ifdef BITCOIN_MINER_EN
   NyanBitcoinInit(&nyan_bitcoin);     // Load up the bitcoin miner, comment this out or delete to disable. 
 #endif
-  bool keys_dma_started = false;
+  bool keys_started = false;
+  uint32_t fpga_retry_ms = HAL_GetTick();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    NyanWatchdogFeed();
     NyanViaProcess(); // Handle any pending VIA raw HID command (main loop context)
-    NyanKeysService(); // Discard a stalled partial key frame so the FPGA retry lands aligned
+    NyanOsProcess(&nos); // Console: parse input, run commands and uploads, send output
+    NyanKeysSaveSettings((NyanKeys*)&nyan_keys); // Persist an FN + WIN toggle made in the key frame IRQ
     NyanKeysSendPendingReport(); // Queue a key change that arrived while the HID endpoint was busy
-    if(nos_fpga.configured && !keys_dma_started) {
-      keys_dma_started = true;
-      NyanKeysStart((NyanKeys*)&nyan_keys);
-    } else if (!nos_fpga.configured) {
-      // FPGA configuration is retried in the background - paced so that a board
-      // whose FPGA never configures keeps full USB/VIA/CDC responsiveness
-      // (FPGAInit blocks for seconds while it reloads the bitstream).
-      static uint32_t fpga_retry_ms = 0;
-      if((HAL_GetTick() - fpga_retry_ms) >= 2000U) {
+
+    if (nos.dfu_mode) {
+      HAL_GPIO_WritePin(Nyan_DFU_Enable_GPIO_Port, Nyan_DFU_Enable_Pin, GPIO_PIN_SET);
+      // Charge the BOOT0 capacitor - keep flushing the console meanwhile
+      uint32_t dfu_start = HAL_GetTick();
+      while ((HAL_GetTick() - dfu_start) < 1000U) {
+        NyanWatchdogFeed();
+        NyanCdcTX(&nos);
+      }
+      NVIC_SystemReset();
+    }
+
+    if (nos_fpga.reconfigure_requested) {
+      // A new bitstream was written: stop the keys (all reported released),
+      // let that report go out, then reload the FPGA
+      nos_fpga.reconfigure_requested = false;
+      if (keys_started) {
+        keys_started = false;
+        NyanKeysStop((NyanKeys*)&nyan_keys);
+        uint32_t flush_start = HAL_GetTick();
+        while (nyan_keys.report_pending && (HAL_GetTick() - flush_start) < 20U)
+          NyanKeysSendPendingReport();
+      }
+      FPGAInit(&nos_fpga);
+      fpga_retry_ms = HAL_GetTick();
+    } else if (!keys_started) {
+      if (nos_fpga.configured) {
+        keys_started = true;
+        NyanKeysStart((NyanKeys*)&nyan_keys);
+      } else if ((HAL_GetTick() - fpga_retry_ms) >= 2000U) {
+        // FPGA configuration is retried in the background - paced so that a board
+        // whose FPGA never configures keeps full USB/VIA/CDC responsiveness
+        // (FPGAInit blocks for seconds while it reloads the bitstream).
         FPGAInit(&nos_fpga);
         fpga_retry_ms = HAL_GetTick(); // pace from the END of the attempt so the main loop gets service time between retries
       }
-    } else if (nos.dfu_mode) {
-      HAL_GPIO_WritePin(Nyan_DFU_Enable_GPIO_Port, Nyan_DFU_Enable_Pin, GPIO_PIN_SET);
-      HAL_Delay(1000);
-      NVIC_SystemReset();
     }
     /* USER CODE END WHILE */
     /* USER CODE BEGIN 3 */
@@ -302,15 +327,8 @@ void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
 
 void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *I2cHandle)
 {
-  uint8_t error = HAL_I2C_GetError(I2cHandle);
-  switch (error)
-  {
-    case HAL_I2C_ERROR_AF :
-      nos_eeprom.tx_failed = true;
-      break;
-    default:
-      Error_Handler();
-  }
+  // NAK, bus error, arbitration loss, ... - the EEPROM driver recovers the bus and retries
+  nos_eeprom.error = true;
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
@@ -354,16 +372,7 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
     }
   }
   if (htim->Instance == TIM8) {
-    // Clear the CDC TX buffer with Nyan large print support
-    NyanCdcTX(&nos);
-    // Every 200ms check to see if the welcome display needs to be presented
-    if(nos.exe == NYAN_EXE_IDLE) {
-      NyanWelcomeDisplay(&nos);
-    }
-    // Program Execution - Must be idle with no TXs inflight since we are modifying the ptr
-    if(nos.exe != NYAN_EXE_IDLE && nos.tx_inflight == 0 && nos.exe_in_progress == 0) {
-      NyanExecute(&nos);
-    }
+    // The console itself runs in the main loop (NyanOsProcess)
     // Turn off the RX CDC LED
     HAL_GPIO_WritePin(Nyan_Keys_LED3_GPIO_Port, Nyan_Keys_LED3_Pin, GPIO_PIN_RESET);
   }
@@ -377,19 +386,8 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-    // Turn on all LEDs on hard error
-    HAL_GPIO_WritePin(GPIOD, Nyan_Keys_LED0_Pin, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(GPIOD, Nyan_Keys_LED1_Pin, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(GPIOD, Nyan_Keys_LED2_Pin, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(GPIOD, Nyan_Keys_LED3_Pin, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(GPIOD, Nyan_Keys_LED4_Pin, GPIO_PIN_SET);
-    // Reset Nyan Keys 
-    NVIC_SystemReset();
-  }
+  // Record the caller for getinfo, turn on all LEDs and reset Nyan Keys
+  NyanFaultRecord(NULL, NYAN_FAULT_ERROR_HANDLER, (uint32_t)__builtin_return_address(0));
   /* USER CODE END Error_Handler_Debug */
 }
 
