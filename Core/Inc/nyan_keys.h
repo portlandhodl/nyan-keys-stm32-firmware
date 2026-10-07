@@ -8,12 +8,13 @@
 
 #include <stdint.h>
 #include <main.h>
+#include "nyan_keys_frame.h"
 
 #define NUM_KEYS 61 /**< Number of key state bits to be read from FPGA over SPI */
 #define NUM_HID_KEYS 60 /**< Number of keys that could have any impact on the HID descriptor - We remove the FN Keys */
 #define NUM_BOOT_KEYS 6 /**< Number of keys that can occupy the boot bytes compatible section of nyan keys*/
 #define NUM_HYBRID_KEYS (NUM_HID_KEYS - NUM_BOOT_KEYS) /**< Number of keys that can occupy the extended scancodes bytes section of nyan keys for NRKO*/
-#define KEYS_WARMUP_READS 10000 /**< Number of spi read to perform to allow key states post init to settle */
+#define NYAN_KEYS_STALL_US 50 /**< A partial frame with no SPI progress for this long is discarded (FPGA retries after 1ms) */
 
 /**
  * @enum NyanKeysReturn
@@ -49,10 +50,13 @@ typedef enum {
  * @brief Structure to hold the state of keys.
  */
 typedef struct {
-    volatile bool warmed_up;                                   /**< We allow for KEYS_WARMUP_READS before allowing the processing of keys */
-    volatile uint32_t warm_up_reads;                           /**< A count of the number of reads to determine if the warmup flag can go true */
-    volatile uint8_t key_states[((NUM_KEYS + 7) / 8) + 1];     /**< Array to hold the state of each key */
-    volatile uint8_t key_states_prv[((NUM_KEYS + 7) / 8) + 1]; /**< Previous state of each key*/
+    volatile bool started;                                     /**< Frame reception is armed and the FPGA is out of reset */
+    volatile bool report_pending;                              /**< key_states changed and the HID report has not been queued yet */
+    volatile uint8_t key_states[NYAN_KEYS_DATA_BYTES];         /**< Last validated key state from the FPGA (1 = released) */
+    volatile uint8_t key_states_prv[NYAN_KEYS_DATA_BYTES];     /**< Key state the last HID report was built from */
+    volatile uint32_t frames_good;                             /**< Frames received with a valid sync byte and CRC */
+    volatile uint32_t frames_bad;                              /**< Frames rejected (sync/CRC mismatch or DMA error) */
+    volatile uint32_t stall_resets;                            /**< Partial frames discarded by the stall watchdog */
     volatile bool super_key_disabled;                          /**< Disable Super Key (Win) key */
     uint8_t boot_byte_cnt;                                     /**< Track the number of boot compatible bytes used */
     uint8_t ext_byte_cnt;                                      /**M Track the number of extended report bytes used */
@@ -66,11 +70,41 @@ typedef struct {
 NyanKeysReturn NyanKeysInit(NyanKeys* keys);
 
 /**
- * @brief Retrieves the value of the key states from the Nyan Keys board.
+ * @brief Arms frame reception (SPI2 slave + DMA) and releases the FPGA from
+ *        reset. The FPGA sends the current key state right away.
  * @param keys Pointer to NyanKeys structure.
  * @return NyanKeysReturn success or failure.
  */
-NyanKeysReturn NyanGetKeys(NyanKeys *keys);
+NyanKeysReturn NyanKeysStart(NyanKeys *keys);
+
+/**
+ * @brief Frame complete handler - call from DMA1_Stream3_IRQHandler.
+ *
+ * Re-arms reception (with an SPI2 reset so every frame starts bit aligned),
+ * validates the frame and acks it. Calls NyanKeysFrameCallback() for each
+ * good frame.
+ */
+void NyanKeysDmaIrqHandler(void);
+
+/**
+ * @brief Stall watchdog - call from the main loop. Discards a partially
+ *        received frame (lost SCLK edge) so the FPGA's retry is received
+ *        bit aligned.
+ */
+void NyanKeysService(void);
+
+/**
+ * @brief Called from interrupt context for every valid frame, after it has
+ *        been acked. keys->key_states holds the new state.
+ * @param keys Pointer to NyanKeys structure.
+ */
+void NyanKeysFrameCallback(NyanKeys *keys);
+
+/**
+ * @brief Main loop hook (implemented by the application) that queues a HID
+ *        report left pending because the USB endpoint was busy.
+ */
+void NyanKeysSendPendingReport(void);
 
 /**
  * @brief Retrieves the state of a specific key.
@@ -102,13 +136,5 @@ NyanKeysReturn NyanKeysWriteSuperDisableEEPROM(Eeprom24xx* eeprom, bool disabled
  * @return Super key enabled or disabled
  */
 bool NyanKeysReadSuperDisableEEPROM(Eeprom24xx* eeprom);
-
-/**
- * @brief Performs the warmup tasks for the Nyan Keys keyboard FPGA key input.
- * @param keys Pointer to NyanKeys structure.
- * @return NyanKeysReturn success or failure.
- * @return NyanKeysReturn success or failure.
- */
-void NyanWarmupIncrementor(NyanKeys *keys);
 
 #endif // NYAN_KEYS_H
