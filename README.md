@@ -37,7 +37,7 @@ _Please make a PR if you decide to use NyanOS for your keyboard PCB_
  - __Status indication - 5 Leds__
  - __Bitcoin Miner - opt-in__
  - __USB HID Interface @ 8000hz Polling__
- - __SPI Master to FPGA switch serializer and debouncer__
+ - __SPI slave for key frames pushed by the FPGA switch serializer and debouncer (sync byte + CRC-8, acked per frame)__
 
 ### VIA Support
 NyanOS speaks the VIA protocol over a dedicated raw HID interface (usage page ```0xFF60```, usage ```0x61```, 32 byte interrupt IN/OUT reports) while keeping the 8000hz NKRO keyboard interface untouched. All 61 keys are remappable on 2 layers (base + FN) and the keymap is persisted to the onboard EEPROM (bank 0, address ```0x0100```, big-endian layer-major - the same layout QMK uses, so the standard VIA buffer commands work unmodified).

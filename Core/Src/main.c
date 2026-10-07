@@ -161,9 +161,11 @@ int main(void)
   while (1)
   {
     NyanViaProcess(); // Handle any pending VIA raw HID command (main loop context)
+    NyanKeysService(); // Discard a stalled partial key frame so the FPGA retry lands aligned
+    NyanKeysSendPendingReport(); // Queue a key change that arrived while the HID endpoint was busy
     if(nos_fpga.configured && !keys_dma_started) {
       keys_dma_started = true;
-      NyanGetKeys((NyanKeys*)&nyan_keys);
+      NyanKeysStart((NyanKeys*)&nyan_keys);
     } else if (!nos_fpga.configured) {
       // FPGA configuration is retried in the background - paced so that a board
       // whose FPGA never configures keeps full USB/VIA/CDC responsiveness
@@ -237,21 +239,49 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
+/**
+ * Build and queue the HID report for the latest key state, but only once the
+ * keyboard endpoint is idle. USBD_HID_Keyboard_SendReport() silently drops a
+ * report while the previous one is in flight (and the endpoint reads the
+ * buffer at transmit time), so a change is kept pending until it can be sent.
+ * Caller must keep the key frame IRQ from running concurrently.
+ */
+static void NyanKeysTrySendReport(void)
+{
+  USBD_HID_Keyboard_HandleTypeDef *hhid = (USBD_HID_Keyboard_HandleTypeDef *)hUsbDevice.pClassData_HID_Keyboard;
+
+  if(!nyan_keys.report_pending || hhid == NULL ||
+     hUsbDevice.dev_state != USBD_STATE_CONFIGURED || hhid->state != KEYBOARD_HID_IDLE)
+    return;
+
+  NyanBuildHidReportFromKeyStates((NyanKeys*)&nyan_keys, &nyan_hid_report);
+  nyan_keys.report_pending = false;
+  USBD_HID_Keyboard_SendReport(&hUsbDevice, (uint8_t*)&nyan_hid_report, sizeof(nyan_hid_report));
+}
+
+// Key frame interrupt context: a validated (and already acked) frame arrived
+void NyanKeysFrameCallback(NyanKeys *keys)
 {
   HAL_GPIO_WritePin(GPIOD, Nyan_Keys_LED1_Pin, GPIO_PIN_SET);
-  // Increase the performance counter
+  // Increase the performance counter (frames per second)
   nos.perf_keys_count_spi_calls_nxt++;
-  // If the Nyan Keys FPGA isn't warmed up -> increment the warmup counter.
-  if(!nyan_keys.warmed_up) {
-    NyanWarmupIncrementor((NyanKeys*)&nyan_keys);
-    return;
-  } else if(!(memcmp((uint8_t*)&nyan_keys.key_states[0], (uint8_t*)&nyan_keys.key_states_prv[0], sizeof(nyan_keys.key_states)) == 0)) {
-    NyanBuildHidReportFromKeyStates((NyanKeys*)&nyan_keys, &nyan_hid_report);
-    memcpy((uint8_t*)&nyan_keys.key_states_prv[0], (uint8_t*)&nyan_keys.key_states[0], sizeof(nyan_keys.key_states));
-    USBD_HID_Keyboard_SendReport(&hUsbDevice, (uint8_t*)&nyan_hid_report, sizeof(nyan_hid_report));
+  // Periodic refresh frames repeat the same state - only report changes
+  if(memcmp((uint8_t*)&keys->key_states[0], (uint8_t*)&keys->key_states_prv[0], sizeof(keys->key_states)) != 0) {
+    memcpy((uint8_t*)&keys->key_states_prv[0], (uint8_t*)&keys->key_states[0], sizeof(keys->key_states));
+    keys->report_pending = true;
   }
+  NyanKeysTrySendReport();
   HAL_GPIO_WritePin(GPIOD, Nyan_Keys_LED1_Pin, GPIO_PIN_RESET);
+}
+
+// Main loop context: retry a report that could not be queued from the IRQ
+void NyanKeysSendPendingReport(void)
+{
+  if(!nyan_keys.report_pending)
+    return;
+  HAL_NVIC_DisableIRQ(DMA1_Stream3_IRQn);
+  NyanKeysTrySendReport();
+  HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
 }
 
 void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef *I2cHandle)

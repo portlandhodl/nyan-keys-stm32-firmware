@@ -65,8 +65,10 @@ void Error_Handler(void);
 #define FPGA_config_nrst_GPIO_Port GPIOE
 #define Nyan_FPGA_Config_Done_Pin GPIO_PIN_13
 #define Nyan_FPGA_Config_Done_GPIO_Port GPIOC
-#define Keys_Slave_Select_Pin GPIO_PIN_0
-#define Keys_Slave_Select_GPIO_Port GPIOC
+#define keys_fpga_resetn_Pin GPIO_PIN_0
+#define keys_fpga_resetn_GPIO_Port GPIOC
+#define keys_ack_Pin GPIO_PIN_2
+#define keys_ack_GPIO_Port GPIOC
 #define Nyan_Keys_LED0_Pin GPIO_PIN_0
 #define Nyan_Keys_LED0_GPIO_Port GPIOD
 #define Nyan_Keys_LED1_Pin GPIO_PIN_1
